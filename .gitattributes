@@ -1,0 +1,3 @@
+# Keep manifest checksums stable across Windows, macOS, and Linux clones.
+studies/*/cohort_uploads/** -text
+studies/*/materials/** -text

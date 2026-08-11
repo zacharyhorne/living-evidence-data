@@ -1,0 +1,2 @@
+Group,DV,Status,Test_Type,Prereg_Delta,Prereg_Dir,Final_E,Total_N,Observed_d,d_CI_lo,d_CI_hi,Timestamp
+Study2_Inherence,DV,Frozen,oneSample,0.3,greater,15.060635444868392,27,0.5257,0.1182,0.9244,2026-04-23 12:59

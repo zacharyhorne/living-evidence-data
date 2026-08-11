@@ -1,0 +1,5 @@
+path,role,cohort,display_name,media_type,bytes,sha256
+cohort_uploads/Study1_META.csv,meta,1,Study1_META.csv,text/csv,324,48ca3efa43fa3d8c5885cfc3c5af0ee068f9c37bfbacd19de744e20f401cd62f
+cohort_uploads/Study1_trajectory.csv,trajectory,1,Study1_trajectory.csv,text/csv,3180,e3a8a2d6076720ca588ae9c001009f0c3091a23c0fd6351811e85f49d14222bf
+materials/abstract.txt,abstract,,abstract.txt,text/plain,37,8ad495e143ed4e3451676f0b9049cc30c905089feca1c81367dc46f5a779ade6
+materials/survey.qsf,material,,survey.qsf,application/json,138747,349978ded7dfd6934ed2d63926209bc8acc9c88174cc3144ed106c9a00684895
