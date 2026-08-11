@@ -135,8 +135,11 @@ hub_sha256 <- function(path) {
       system2(command, args = args, stdout = TRUE, stderr = TRUE),
       error = function(e) character()
     ))
-    compact <- gsub("[[:space:]]+", "", output)
-    matches <- compact[grepl("^[0-9A-Fa-f]{64}$", compact)]
+    matches <- regmatches(
+      output,
+      regexpr("[0-9A-Fa-f]{64}", output, perl = TRUE)
+    )
+    matches <- matches[nzchar(matches)]
     if (length(matches) == 0L) NULL else tolower(matches[1])
   }
 
