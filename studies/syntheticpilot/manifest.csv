@@ -1,0 +1,5 @@
+"path","role","cohort","display_name","media_type","bytes","sha256"
+"cohort_uploads/Group_2_META.csv","meta","2","Cohort 2 meta","text/csv","1099","56ad97f921860a5295c8c7e2fedab1f421df344321a2825ecc0e90f8b383c2dc"
+"cohort_uploads/Group_2_trajectory.csv","trajectory","2","Cohort 2 trajectory","text/csv","355","cf44bad744e03108318b1cc7b7f40e6c093857222267ee8a8e8f8ffa7162a607"
+"cohort_uploads/Group_1_META.csv","meta","1","Cohort 1 meta","text/csv","1103","66bb24645f17b039f6b9b9fedb18ac1c5c977e199c9c4bb6d316f7804b93cbd4"
+"cohort_uploads/Group_1_trajectory.csv","trajectory","1","Cohort 1 trajectory","text/csv","507","8d062a181ff0acc3bd2dfc8d1dac2bddaec07965fba6c7e60a161200bc761924"
