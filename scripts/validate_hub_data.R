@@ -221,6 +221,125 @@ hub_check_required_columns <- function(data, required, context, add_error) {
   length(duplicate_columns) == 0L && length(missing_columns) == 0L
 }
 
+# These base-R checks are mirrored in the standalone repository validator.
+# Tests compare both implementations on the same valid and malformed bundles.
+hub_adjustment_log <- function(peak, method) {
+  if (any(!is.finite(peak) | peak < 0)) stop("Invalid running maximum.")
+  switch(method,
+    running_max_square_root_v1 = peak / 2 - log(2),
+    running_max_power_quarter_v1 = .75 * peak - log(4),
+    running_max_mixture_v1 = {
+      value <- numeric(length(peak))
+      small <- peak < .01
+      x <- peak[small]
+      value[small] <- log(.5 + x / 6 + x^2 / 24 + x^3 / 120 + x^4 / 720 + x^5 / 5040)
+      x <- peak[!small]
+      value[!small] <- x + log1p(-(1 + x) * exp(-x)) - 2 * log(x)
+      value
+    },
+    stop("Unknown evidence conversion."))
+}
+
+hub_evidence_methods <- function(data) {
+  value <- data[["Evidence_Method"]]
+  if (is.null(value)) value <- rep("original", nrow(data))
+  value <- as.character(value)
+  value[is.na(value) | value %in% c("", "NA")] <- "original"
+  if (any(!value %in% c("original", "running_max_square_root_v1",
+      "running_max_power_quarter_v1", "running_max_mixture_v1"))) stop("Unknown evidence method.")
+  value
+}
+
+hub_validate_calibrated_pair <- function(meta, trajectory, file_name) {
+  methods <- hub_evidence_methods(meta)
+  tr_methods <- hub_evidence_methods(trajectory)
+  if (!any(c(methods, tr_methods) != "original")) return(invisible(NULL))
+  need <- function(data, columns) {
+    if (!all(columns %in% names(data)) || !nrow(data)) {
+      stop("Adjusted evidence requires matching summary and trajectory files: ", file_name)
+    }
+  }
+  need(meta, c("DV", "Test_Type", "Total_N", "Final_E", "Final_Log_E",
+    "Original_Final_Log_E", "Peak_Log_E", "Anytime_P", "Log_Anytime_P"))
+  need(trajectory, c("DV", "n", "log_e", "e_value", "Original_Log_E",
+    "Peak_Log_E", "Anytime_P", "Log_Anytime_P"))
+  same <- function(x, y) isTRUE(all.equal(suppressWarnings(as.numeric(x)),
+    suppressWarnings(as.numeric(y)), tolerance = 1e-10))
+  for (dv in union(as.character(meta$DV), as.character(trajectory$DV))) {
+    m <- meta[!is.na(meta$DV) & meta$DV == dv, , drop = FALSE]
+    tr <- trajectory[!is.na(trajectory$DV) & trajectory$DV == dv, , drop = FALSE]
+    mm <- hub_evidence_methods(m)
+    tm <- hub_evidence_methods(tr)
+    if (!any(c(mm, tm) != "original")) next
+    if (nrow(m) != 1L || !nrow(tr) || mm == "original" || any(tm != mm)) {
+      stop("Use the matching calibrated summary and trajectory for '", file_name, "'.")
+    }
+    n <- suppressWarnings(as.numeric(tr$n))
+    original <- suppressWarnings(as.numeric(tr$Original_Log_E))
+    if (any(!is.finite(n)) || any(n < 2 | n != floor(n)) ||
+        any(diff(n) <= 0) || any(!is.finite(original))) stop("Invalid calibrated checkpoint history.")
+    peak <- cummax(pmax(0, original))
+    expected <- hub_adjustment_log(peak, mm)
+    multiplier <- if (m$Test_Type == "safe_twoSample") 2 else 1
+    if (!m$Test_Type %in% c("safe_twoSample", "safe_oneSample", "safe_paired") ||
+        !same(tr$log_e, expected) || !same(tr$e_value, exp(expected)) ||
+        !same(tr$Peak_Log_E, peak) || !same(tr$Anytime_P, exp(-peak)) ||
+        !same(tr$Log_Anytime_P, -peak) ||
+        !same(m$Final_Log_E, utils::tail(expected, 1)) || !same(m$Final_E, exp(utils::tail(expected, 1))) ||
+        !same(m$Original_Final_Log_E, utils::tail(original, 1)) ||
+        !same(m$Peak_Log_E, utils::tail(peak, 1)) || !same(m$Anytime_P, exp(-utils::tail(peak, 1))) ||
+        !same(m$Log_Anytime_P, -utils::tail(peak, 1)) || !same(m$Total_N, utils::tail(n, 1) * multiplier)) {
+      stop("Calibrated evidence or sample counts disagree in '", file_name, "'.")
+    }
+    if ("Original_Final_E" %in% names(m) && !same(m$Original_Final_E, exp(utils::tail(original, 1)))) {
+      stop("Original evidence disagrees in '", file_name, "'.")
+    }
+  }
+  invisible(NULL)
+}
+
+hub_validate_unique_samples <- function(cohorts) {
+  if (length(cohorts) < 2L) return(invisible(NULL))
+  scalar <- function(row, column, default = "") {
+    x <- row[[column]]
+    if (is.null(x) || !length(x) || is.na(x[1]) || as.character(x[1]) == "NA") default else as.character(x[1])
+  }
+  same_number <- function(x, y) {
+    x <- suppressWarnings(as.numeric(x)); y <- suppressWarnings(as.numeric(y))
+    length(x) == 1L && length(y) == 1L && is.finite(x) && is.finite(y) &&
+      abs(x - y) <= 1e-8 * max(1, abs(x), abs(y))
+  }
+  original_log <- function(row) {
+    if (hub_evidence_methods(row) != "original") return(scalar(row, "Original_Final_Log_E", NA_character_))
+    log_value <- scalar(row, "Final_Log_E", NA_character_)
+    if (is.na(log_value)) log_value <- log(suppressWarnings(as.numeric(scalar(row, "Final_E"))))
+    log_value
+  }
+  for (i in seq_len(length(cohorts) - 1L)) for (j in (i + 1L):length(cohorts)) {
+    for (a in seq_len(nrow(cohorts[[i]]))) for (b in seq_len(nrow(cohorts[[j]]))) {
+      x <- cohorts[[i]][a, , drop = FALSE]; y <- cohorts[[j]][b, , drop = FALSE]
+      if (scalar(x, "DV", "DV") != scalar(y, "DV", "DV")) next
+      id_x <- scalar(x, "Evidence_Sample_ID"); id_y <- scalar(y, "Evidence_Sample_ID")
+      # Earlier exports identified whole files, which can contain independent
+      # cohorts. A shared legacy ID needs a matching analysis signature too.
+      same_id <- nzchar(id_x) && nzchar(id_y) && id_x == id_y
+      signature <- FALSE
+      if (same_id || any(c(hub_evidence_methods(x), hub_evidence_methods(y)) != "original")) {
+        signature <- same_number(x$Total_N, y$Total_N) &&
+          same_number(x$Prereg_Delta, y$Prereg_Delta) &&
+          scalar(x, "Prereg_Dir") == scalar(y, "Prereg_Dir") &&
+          scalar(x, "Test_Type") == scalar(y, "Test_Type") &&
+          scalar(x, "mu0") == scalar(y, "mu0") &&
+          same_number(original_log(x), original_log(y))
+      }
+      if (signature) stop("Possible duplicate sample for outcome '", scalar(x, "DV", "DV"),
+        "' in cohorts ", names(cohorts)[i], " and ", names(cohorts)[j],
+        ". Replace the existing contribution. Verify independent samples before combining.")
+    }
+  }
+  invisible(NULL)
+}
+
 hub_validate_meta <- function(data, context, add_error) {
   schema_ok <- hub_check_required_columns(
     data,
@@ -951,6 +1070,8 @@ validate_hub_data <- function(root = "hub-data", verbose = TRUE) {
 
     meta_dv <- list()
     trajectory_dv <- list()
+    meta_data <- list()
+    trajectory_data <- list()
 
     for (j in seq_len(nrow(manifest))) {
       if (!path_is_safe[j] || duplicated(tolower(path))[j]) next
@@ -1007,14 +1128,28 @@ validate_hub_data <- function(root = "hub-data", verbose = TRUE) {
 
       if (role[j] == "meta") {
         meta_dv[[cohort[j]]] <- hub_validate_meta(data, row_context, add_error)
+        meta_data[[cohort[j]]] <- data
       } else {
         trajectory_dv[[cohort[j]]] <- hub_validate_trajectory(
           data,
           row_context,
           add_error
         )
+        primary <- if ("Source" %in% names(data)) data$Source %in% hub_primary_sources else rep(TRUE, nrow(data))
+        trajectory_data[[cohort[j]]] <- data[primary, , drop = FALSE]
       }
     }
+
+    for (cohort_value in union(names(meta_data), names(trajectory_data))) {
+      m <- meta_data[[cohort_value]]
+      tr <- trajectory_data[[cohort_value]]
+      if (is.null(m)) m <- data.frame()
+      if (is.null(tr)) tr <- data.frame()
+      tryCatch(hub_validate_calibrated_pair(m, tr, paste0("cohort ", cohort_value)),
+        error = function(e) add_error(context, conditionMessage(e)))
+    }
+    tryCatch(hub_validate_unique_samples(meta_data),
+      error = function(e) add_error(context, conditionMessage(e)))
 
     shared_cohorts <- intersect(names(meta_dv), names(trajectory_dv))
     for (cohort_value in shared_cohorts) {
